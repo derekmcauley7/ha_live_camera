@@ -161,6 +161,8 @@ class HaLiveCamera : public Component, public image::Image {
   uint32_t last_fps_count_{0};
   float measured_fps_{0.0f};
   uint32_t decode_errors_{0};
+  uint32_t published_count_{0};
+  uint32_t last_diag_ms_{0};
 
   std::vector<Trigger<> *> frame_triggers_;
   std::vector<Trigger<std::string> *> status_triggers_;

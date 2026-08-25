@@ -163,6 +163,7 @@ void HaLiveCamera::loop() {
     // no matter how many frames decode behind it.
     this->get_lv_image_dsc();
 #endif
+    this->published_count_++;
     for (auto *t : this->frame_triggers_)
       t->trigger();
   }
@@ -173,6 +174,42 @@ void HaLiveCamera::loop() {
     ESP_LOGD(TAG, "Status: %s", stream_status_to_string(s));
     for (auto *t : this->status_triggers_)
       t->trigger(std::string(stream_status_to_string(s)));
+  }
+
+  // --- diagnostics -----------------------------------------------------------
+  // Prints once every 5s while a stream is active. Between them these numbers
+  // separate every remaining failure mode: a flat buffer means the decoder is
+  // at fault, a stale dsc pointer means the descriptor is not reaching LVGL,
+  // and correct values for both mean the fault is in the LVGL draw path.
+  const uint32_t tnow = millis();
+  if (this->active_index_.load(std::memory_order_relaxed) >= 0 &&
+      (this->last_diag_ms_ == 0 || tnow - this->last_diag_ms_ >= 5000)) {
+    this->last_diag_ms_ = tnow;
+#ifdef USE_LVGL
+    const bool lvgl_built = true;
+#else
+    const bool lvgl_built = false;
+#endif
+    const uint16_t *px = reinterpret_cast<const uint16_t *>(this->data_start_);
+    uint16_t a = 0, b = 0, c = 0, d = 0;
+    size_t npx = static_cast<size_t>(this->width_) * this->height_;
+    if (px != nullptr && npx > 0) {
+      a = px[0];
+      b = px[npx / 4];
+      c = px[npx / 2];
+      d = px[npx - 1];
+    }
+    ESP_LOGI(TAG,
+             "diag lvgl=%d fb=%ux%u pub=%u dec=%u drop=%u fps=%.1f data=%p px=%04x %04x %04x %04x",
+             lvgl_built ? 1 : 0, (unsigned) this->width_, (unsigned) this->height_,
+             (unsigned) this->published_count_,
+             (unsigned) this->decoded_count_.load(std::memory_order_relaxed),
+             (unsigned) this->dropped_frames(), this->measured_fps_, (void *) this->data_start_, a, b, c, d);
+#ifdef USE_LVGL
+    ESP_LOGI(TAG, "diag dsc data=%p w=%u h=%u stride=%u cf=%u", (void *) this->dsc_.data,
+             (unsigned) this->dsc_.header.w, (unsigned) this->dsc_.header.h,
+             (unsigned) this->dsc_.header.stride, (unsigned) this->dsc_.header.cf);
+#endif
   }
 
   const uint32_t now = millis();
