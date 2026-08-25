@@ -87,6 +87,9 @@ class HaLiveCamera : public Component, public image::Image {
     this->max_height_ = h;
   }
   void set_max_frame_bytes(uint32_t n) { this->max_frame_bytes_ = n; }
+  // The JPEG driver documents BGR element order as "small endian", which is
+  // what LVGL wants when LV_COLOR_16_SWAP is 0 (ESPHome's little_endian).
+  void set_rgb_order_bgr(bool bgr) { this->rgb_order_bgr_ = bgr; }
   void set_task_priority(uint8_t p) { this->task_priority_ = p; }
 
   void add_frame_trigger(Trigger<> *t) { this->frame_triggers_.push_back(t); }
@@ -128,6 +131,7 @@ class HaLiveCamera : public Component, public image::Image {
   uint16_t max_height_{272};
   uint32_t max_frame_bytes_{128 * 1024};
   uint8_t task_priority_{5};
+  bool rgb_order_bgr_{true};
 
   // Triple-buffered so the decoder never writes the buffer LVGL is drawing
   // from: the task only picks a buffer that is neither the most recently

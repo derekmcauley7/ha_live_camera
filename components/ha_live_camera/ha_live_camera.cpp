@@ -137,6 +137,7 @@ void HaLiveCamera::dump_config() {
   ESP_LOGCONFIG(TAG, "  Max frame: %ux%u (buffer %u bytes x%u)", (unsigned) this->max_width_,
                 (unsigned) this->max_height_, (unsigned) this->fb_size_, (unsigned) NUM_FB);
   ESP_LOGCONFIG(TAG, "  Max JPEG:  %u bytes", (unsigned) this->jpeg_in_size_);
+  ESP_LOGCONFIG(TAG, "  RGB order: %s", this->rgb_order_bgr_ ? "BGR (little endian)" : "RGB (big endian)");
   for (size_t i = 0; i < this->cameras_.size(); i++) {
     ESP_LOGCONFIG(TAG, "  Camera %u: %s (%s)", (unsigned) i, this->cameras_[i].name.c_str(),
                   this->cameras_[i].entity_id.c_str());
@@ -396,7 +397,8 @@ void HaLiveCamera::handle_jpeg_(const uint8_t *data, size_t len) {
 
   jpeg_decode_cfg_t dec_cfg = {};
   dec_cfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB565;
-  dec_cfg.rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_RGB;
+  dec_cfg.rgb_order =
+      this->rgb_order_bgr_ ? JPEG_DEC_RGB_ELEMENT_ORDER_BGR : JPEG_DEC_RGB_ELEMENT_ORDER_RGB;
   dec_cfg.conv_std = JPEG_YUV_RGB_CONV_STD_BT601;
 
   uint32_t out_size = 0;
