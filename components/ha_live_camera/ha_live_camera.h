@@ -102,7 +102,9 @@ class HaLiveCamera : public Component, public image::Image {
   size_t camera_count() const { return this->cameras_.size(); }
   const std::string &display_name(size_t i) const { return this->cameras_[i].name; }
   int active_index() const { return this->active_index_.load(std::memory_order_relaxed); }
-  StreamStatus status() const { return this->status_.load(std::memory_order_relaxed); }
+  StreamStatus status() const {
+    return static_cast<StreamStatus>(this->status_.load(std::memory_order_relaxed));
+  }
   const char *status_string() const { return stream_status_to_string(this->status()); }
   float measured_fps() const { return this->measured_fps_; }
   uint32_t dropped_frames() const { return this->parser_.frames_dropped() + this->decode_errors_; }
@@ -166,7 +168,9 @@ template<typename... Ts> class ShowCameraAction : public Action<Ts...> {
  public:
   explicit ShowCameraAction(HaLiveCamera *parent) : parent_(parent) {}
   TEMPLATABLE_VALUE(int, index)
-  void play(Ts... x) override {
+  // Action::play is declared `virtual void play(const Ts &...x)` -- taking the
+  // pack by value does not override it, which leaves the class abstract.
+  void play(const Ts &...x) override {
     int i = this->index_.value(x...);
     if (i >= 0)
       this->parent_->show(static_cast<size_t>(i));
@@ -179,7 +183,7 @@ template<typename... Ts> class ShowCameraAction : public Action<Ts...> {
 template<typename... Ts> class StopCameraAction : public Action<Ts...> {
  public:
   explicit StopCameraAction(HaLiveCamera *parent) : parent_(parent) {}
-  void play(Ts... x) override { this->parent_->stop(); }
+  void play(const Ts &...x) override { this->parent_->stop(); }
 
  protected:
   HaLiveCamera *parent_;

@@ -12,6 +12,8 @@
 
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
+#include "esphome/core/string_ref.h"
+#include <functional>
 #endif
 
 namespace esphome {
@@ -64,7 +66,7 @@ void HaLiveCamera::setup() {
     size_t got = 0;
     this->fb_[i] = static_cast<uint8_t *>(jpeg_alloc_decoder_mem(this->fb_size_, &out_cfg, &got));
     if (this->fb_[i] == nullptr) {
-      ESP_LOGE(TAG, "Failed to allocate frame buffer %u (%u bytes)", i, (unsigned) this->fb_size_);
+      ESP_LOGE(TAG, "Failed to allocate frame buffer %u (%u bytes)", (unsigned) i, (unsigned) this->fb_size_);
       this->mark_failed();
       return;
     }
@@ -109,9 +111,14 @@ void HaLiveCamera::setup() {
   // attribute, over the API connection ESPHome already has. This is what lets
   // the YAML stay in plain entity_ids while the stream comes from Frigate.
   for (size_t i = 0; i < this->cameras_.size(); i++) {
+    // The callback type must be spelled out: APIServer overloads this on both
+    // std::function<void(StringRef)> and std::function<void(const std::string&)>,
+    // and a bare lambda is convertible to both, which is ambiguous.
+    std::function<void(StringRef)> cb = [this, i](StringRef state) {
+      this->set_camera_name(i, std::string(state.c_str(), state.size()));
+    };
     api::global_api_server->subscribe_home_assistant_state(
-        this->cameras_[i].entity_id, optional<std::string>("camera_name"),
-        [this, i](const std::string &state) { this->set_camera_name(i, state); });
+        this->cameras_[i].entity_id, optional<std::string>("camera_name"), std::move(cb));
   }
 #endif
 
@@ -126,9 +133,9 @@ void HaLiveCamera::setup() {
 void HaLiveCamera::dump_config() {
   ESP_LOGCONFIG(TAG, "HA Live Camera:");
   ESP_LOGCONFIG(TAG, "  Frigate:  %s (fps=%u height=%u)", this->frigate_url_.c_str(),
-                this->stream_fps_, this->stream_height_);
-  ESP_LOGCONFIG(TAG, "  Max frame: %ux%u (buffer %u bytes x%u)", this->max_width_, this->max_height_,
-                (unsigned) this->fb_size_, NUM_FB);
+                (unsigned) this->stream_fps_, (unsigned) this->stream_height_);
+  ESP_LOGCONFIG(TAG, "  Max frame: %ux%u (buffer %u bytes x%u)", (unsigned) this->max_width_,
+                (unsigned) this->max_height_, (unsigned) this->fb_size_, (unsigned) NUM_FB);
   ESP_LOGCONFIG(TAG, "  Max JPEG:  %u bytes", (unsigned) this->jpeg_in_size_);
   for (size_t i = 0; i < this->cameras_.size(); i++) {
     ESP_LOGCONFIG(TAG, "  Camera %u: %s (%s)", (unsigned) i, this->cameras_[i].name.c_str(),
@@ -361,7 +368,7 @@ void HaLiveCamera::handle_jpeg_(const uint8_t *data, size_t len) {
 
   if (info.width > this->max_width_ || info.height > this->max_height_) {
     ESP_LOGW(TAG, "frame %ux%u exceeds configured max %ux%u", (unsigned) info.width, (unsigned) info.height,
-             this->max_width_, this->max_height_);
+             (unsigned) this->max_width_, (unsigned) this->max_height_);
     this->decode_errors_++;
     return;
   }
