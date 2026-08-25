@@ -117,6 +117,7 @@ class HaLiveCamera : public Component, public image::Image {
   const char *status_string() const { return stream_status_to_string(this->status()); }
   float measured_fps() const { return this->measured_fps_; }
   uint32_t dropped_frames() const { return this->parser_.frames_dropped() + this->decode_errors_; }
+  uint32_t skipped_frames() const { return this->skipped_frames_; }
 
  protected:
   static void task_trampoline_(void *arg);
@@ -168,6 +169,7 @@ class HaLiveCamera : public Component, public image::Image {
   float measured_fps_{0.0f};
   uint32_t decode_errors_{0};
   uint32_t published_count_{0};
+  uint32_t skipped_frames_{0};
   uint32_t last_diag_ms_{0};
 
   std::vector<Trigger<> *> frame_triggers_;

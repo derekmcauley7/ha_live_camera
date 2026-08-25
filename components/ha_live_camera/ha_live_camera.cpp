@@ -199,14 +199,15 @@ void HaLiveCamera::loop() {
       c = px[npx / 2];
       d = px[npx - 1];
     }
-    ESP_LOGI(TAG,
-             "diag lvgl=%d fb=%ux%u pub=%u dec=%u drop=%u fps=%.1f data=%p px=%04x %04x %04x %04x",
+    ESP_LOGD(TAG,
+             "diag lvgl=%d fb=%ux%u pub=%u dec=%u drop=%u skip=%u fps=%.1f data=%p px=%04x %04x %04x %04x",
              lvgl_built ? 1 : 0, (unsigned) this->width_, (unsigned) this->height_,
              (unsigned) this->published_count_,
              (unsigned) this->decoded_count_.load(std::memory_order_relaxed),
-             (unsigned) this->dropped_frames(), this->measured_fps_, (void *) this->data_start_, a, b, c, d);
+             (unsigned) this->dropped_frames(), (unsigned) this->skipped_frames_, this->measured_fps_,
+             (void *) this->data_start_, a, b, c, d);
 #ifdef USE_LVGL
-    ESP_LOGI(TAG, "diag dsc data=%p w=%u h=%u stride=%u cf=%u", (void *) this->dsc_.data,
+    ESP_LOGD(TAG, "diag dsc data=%p w=%u h=%u stride=%u cf=%u", (void *) this->dsc_.data,
              (unsigned) this->dsc_.header.w, (unsigned) this->dsc_.header.h,
              (unsigned) this->dsc_.header.stride, (unsigned) this->dsc_.header.cf);
 #endif
@@ -419,9 +420,19 @@ void HaLiveCamera::handle_jpeg_(const uint8_t *data, size_t len) {
     return;
   }
 
-  // Pick a buffer that is neither on screen nor queued for it.
+  // Latency control. If the previously decoded frame has not been picked up
+  // by loop() yet, we are producing faster than the UI can consume, and
+  // decoding this one would only add to a backlog we can never work off --
+  // every frame would then be displayed later than the last. Skip it.
+  // Parsing is far cheaper than decoding, so skipping also lets the read loop
+  // drain the socket faster, which is what actually claws back latency when
+  // the stream is ahead of us.
   const int8_t shown = this->displayed_index_.load(std::memory_order_acquire);
   const int8_t ready = this->ready_index_.load(std::memory_order_acquire);
+  if (ready >= 0 && ready != shown) {
+    this->skipped_frames_++;
+    return;
+  }
   int8_t target = -1;
   for (int8_t i = 0; i < static_cast<int8_t>(NUM_FB); i++) {
     if (i != shown && i != ready) {
