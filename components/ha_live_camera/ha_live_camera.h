@@ -102,7 +102,9 @@ class HaLiveCamera : public Component, public image::Image {
   size_t camera_count() const { return this->cameras_.size(); }
   const std::string &display_name(size_t i) const { return this->cameras_[i].name; }
   int active_index() const { return this->active_index_.load(std::memory_order_relaxed); }
-  StreamStatus status() const { return this->status_.load(std::memory_order_relaxed); }
+  StreamStatus status() const {
+    return static_cast<StreamStatus>(this->status_.load(std::memory_order_relaxed));
+  }
   const char *status_string() const { return stream_status_to_string(this->status()); }
   float measured_fps() const { return this->measured_fps_; }
   uint32_t dropped_frames() const { return this->parser_.frames_dropped() + this->decode_errors_; }
