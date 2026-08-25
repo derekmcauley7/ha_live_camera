@@ -71,7 +71,13 @@ class HaLiveCamera : public Component, public image::Image {
   void setup() override;
   void loop() override;
   void dump_config() override;
-  float get_setup_priority() const override { return setup_priority::LATE; }
+  // MUST be higher than LvglComponent (setup_priority::PROCESSOR, 400).
+  // LVGL builds its widgets during setup and calls lv_image_set_src() with
+  // whatever get_lv_image_dsc() returns AT THAT MOMENT, then sizes the image
+  // widget from it once and never re-measures. If our buffers are not
+  // allocated yet the widget is created 0x0 and stays invisible forever, no
+  // matter how many frames decode behind it.
+  float get_setup_priority() const override { return setup_priority::DATA; }
 
   // --- configuration (called from generated code) ---
   void set_frigate_url(const std::string &url) { this->frigate_url_ = url; }
