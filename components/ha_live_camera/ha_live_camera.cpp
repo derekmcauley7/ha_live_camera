@@ -154,6 +154,14 @@ void HaLiveCamera::loop() {
     this->height_ = this->fb_h_[ready];
     this->data_start_ = this->fb_[ready];
     this->displayed_index_.store(ready, std::memory_order_release);
+#ifdef USE_LVGL
+    // Image::get_lv_image_dsc() is what copies data_start_/width_/height_ into
+    // the lv_image_dsc_t. LVGL is handed a pointer to that struct once, when
+    // the widget's src is set, and never asks for it again -- so without this
+    // call the widget keeps drawing whatever buffer was current at setup(),
+    // no matter how many frames decode behind it.
+    this->get_lv_image_dsc();
+#endif
     for (auto *t : this->frame_triggers_)
       t->trigger();
   }
