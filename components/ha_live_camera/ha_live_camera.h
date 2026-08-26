@@ -127,6 +127,9 @@ class HaLiveCamera : public Component, public image::Image {
   void run_stream_(size_t index);
   void handle_jpeg_(const uint8_t *data, size_t len);
   void set_status_(StreamStatus s);
+  // Publish an all-black frame so a camera switch never shows the
+  // previous camera while the new one is connecting.
+  void blank_display_();
   std::string build_url_(const CameraEntry &c) const;
 
   std::string frigate_url_;
@@ -171,6 +174,7 @@ class HaLiveCamera : public Component, public image::Image {
   uint32_t published_count_{0};
   uint32_t skipped_frames_{0};
   uint32_t last_diag_ms_{0};
+  int last_started_index_{-1};
 
   std::vector<Trigger<> *> frame_triggers_;
   std::vector<Trigger<std::string> *> status_triggers_;

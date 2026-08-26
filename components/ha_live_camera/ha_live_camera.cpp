@@ -259,11 +259,30 @@ void HaLiveCamera::show_entity(const std::string &entity_id) {
 
 void HaLiveCamera::stop() {
   this->requested_index_.store(-1, std::memory_order_release);
+  // Next open starts from black rather than a frame that may be minutes old.
+  this->last_started_index_ = -1;
   this->set_status_(StreamStatus::IDLE);
 }
 
 void HaLiveCamera::set_status_(StreamStatus s) {
   this->status_.store(static_cast<uint8_t>(s), std::memory_order_relaxed);
+}
+
+void HaLiveCamera::blank_display_() {
+  const int8_t shown = this->displayed_index_.load(std::memory_order_acquire);
+  int8_t target = -1;
+  for (int8_t i = 0; i < static_cast<int8_t>(NUM_FB); i++) {
+    if (i != shown) {
+      target = i;
+      break;
+    }
+  }
+  if (target < 0 || this->fb_[target] == nullptr)
+    return;
+  memset(this->fb_[target], 0, this->fb_size_);
+  this->fb_w_[target] = this->max_width_;
+  this->fb_h_[target] = this->max_height_;
+  this->ready_index_.store(target, std::memory_order_release);
 }
 
 std::string HaLiveCamera::build_url_(const CameraEntry &c) const {
@@ -316,6 +335,11 @@ void HaLiveCamera::run_stream_(size_t index) {
     this->set_status_(StreamStatus::CONNECTING);
     vTaskDelay(pdMS_TO_TICKS(500));
     return;
+  }
+
+  if (static_cast<int>(index) != this->last_started_index_) {
+    this->blank_display_();
+    this->last_started_index_ = static_cast<int>(index);
   }
 
   const std::string url = this->build_url_(entry);
@@ -417,6 +441,14 @@ void HaLiveCamera::handle_jpeg_(const uint8_t *data, size_t len) {
     ESP_LOGW(TAG, "frame %ux%u exceeds configured max %ux%u", (unsigned) info.width, (unsigned) info.height,
              (unsigned) this->max_width_, (unsigned) this->max_height_);
     this->decode_errors_++;
+    return;
+  }
+
+  // A frame that arrived from the camera we are switching away from would
+  // land on screen after the switch. Bin it.
+  if (this->active_index_.load(std::memory_order_acquire) !=
+      this->requested_index_.load(std::memory_order_acquire)) {
+    this->skipped_frames_++;
     return;
   }
 

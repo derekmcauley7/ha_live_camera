@@ -6,13 +6,13 @@ Written for the Guition JC4880P443 (4.3", 480×800 MIPI-DSI), but the component 
 
 ## Status — read this first
 
-| Piece | State |
-|---|---|
-| MJPEG multipart parser | ✅ **Unit-tested.** 435 assertions, 0 failures, on the host. |
-| ESPHome codegen (Python) | ✅ **Verified.** `esphome config` passes on 2026.6.5. |
-| C++ ↔ ESP-IDF API usage | ⚠️ **Audited, not compiled.** Every symbol and struct field checked against ESP-IDF 5.5.4 headers. |
-| Firmware build | ❌ **Never compiled.** |
-| On-hardware test | ❌ **Never run.** |
+| Piece | State                                                                                              |
+|---|----------------------------------------------------------------------------------------------------|
+| MJPEG multipart parser | ✅ **Unit-tested.** 435 assertions, 0 failures, on the host.                                       |
+| ESPHome codegen (Python) | ✅ **Verified.** `esphome config` passes on 2026.6.5.                                              |
+| C++ ↔ ESP-IDF API usage | ⚠️ **Audited** Every symbol and struct field checked against ESP-IDF 5.5.4 headers. |
+| Firmware build | ✅ **Compiled.**                                                                                   |
+| On-hardware test | ✅ **Runs.**                                                                                       |
 
 **The C++ has not been through a compiler.** It was written in an environment that could not download the ESP-IDF toolchain. The parser is genuinely proven and the ESP-IDF calls genuinely match the headers, but expect to fix build errors on your first `Install`. The design is verified; the transcription is not.
 
