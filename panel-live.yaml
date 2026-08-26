@@ -20,7 +20,7 @@ substitutions:
   friendly_name: Office Panel 2.0
 
   # Frigate's unauthenticated API port, reachable from the panel on your LAN
-  frigate_url: "http://FRIGRATE_IP_ADDRESS:5000"
+  frigate_url: !secret frigate_ip
 
   # ------------------------------------------------------------ status bar --
   temp_entity: sensor.blink_garden_1_temperature
