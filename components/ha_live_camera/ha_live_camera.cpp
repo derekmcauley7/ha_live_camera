@@ -244,6 +244,12 @@ void HaLiveCamera::show(size_t index) {
     return;
   }
   this->set_status_(StreamStatus::CONNECTING);
+  // Blank HERE, not in the network task. show() runs on the main loop, so the
+  // screen clears on the tap itself. Doing it in run_stream_() meant waiting
+  // for the outgoing stream's read to return and its socket to close first --
+  // a few hundred milliseconds of the previous camera still on screen.
+  if (static_cast<int>(index) != this->last_started_index_)
+    this->blank_display_();
   this->requested_index_.store(static_cast<int>(index), std::memory_order_release);
 }
 
@@ -261,6 +267,7 @@ void HaLiveCamera::stop() {
   this->requested_index_.store(-1, std::memory_order_release);
   // Next open starts from black rather than a frame that may be minutes old.
   this->last_started_index_ = -1;
+  this->blank_display_();
   this->set_status_(StreamStatus::IDLE);
 }
 
@@ -337,10 +344,7 @@ void HaLiveCamera::run_stream_(size_t index) {
     return;
   }
 
-  if (static_cast<int>(index) != this->last_started_index_) {
-    this->blank_display_();
-    this->last_started_index_ = static_cast<int>(index);
-  }
+  this->last_started_index_ = static_cast<int>(index);
 
   const std::string url = this->build_url_(entry);
 
