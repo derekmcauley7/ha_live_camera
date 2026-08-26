@@ -1,61 +1,101 @@
 # =============================================================================
-# Guition JC4880P443 (ESP32-P4, 4.3" 480x800) — Home Assistant control panel
+# Office Panel - Guition JC4880P443 (ESP32-P4, 480x800 driven as 800x480)
 # =============================================================================
-# A 2x4 grid of tiles. Some tiles are cameras (tap -> full-screen view with a
-# Back button). The rest are lights/sockets (tap -> toggle, tile lights up to
-# show state).
+# Status bar   outside temp, clock, wifi
+# Page 1       Lights & plugs - tap toggles, tile turns amber when on
+# Page 2       Cameras        - tap for live video, BACK to return
+# Swipe left/right, or use the buttons at the bottom, to change page.
 #
-# LIVE VIDEO: camera tiles open a continuous MJPEG stream decoded by the
-# ESP32-P4's hardware JPEG engine (components/ha_live_camera). Not snapshots.
+# EVERYTHING YOU WOULD NORMALLY CHANGE IS IN THE substitutions BLOCK BELOW.
 #
-# You configure Home Assistant entity_ids. The component subscribes to each
-# entity's camera_name attribute over the ESPHome API connection Home Assistant
-# already has, and streams from Frigate's MJPEG endpoint. No credentials, no
-# entries in configuration.yaml, no transcoding anywhere.
+# Changing an icon: pick one at https://pictogrammers.com/library/mdi/, take
+# its F0xxx codepoint and write it as "\U000F0xxx". The glyphs: list further
+# down reads the same substitutions, so you only edit it in one place.
+# Two tiles must not use the SAME icon, or the font gets a duplicate glyph.
 # =============================================================================
 
 substitutions:
-  name: hall-panel
-  friendly_name: Hall Panel
+  # ---------------------------------------------------------------- device --
+  name: office-panel-2
+  friendly_name: Office Panel 2.0
 
-  # Frigate's unauthenticated API port, reachable from the panel on your LAN.
-  frigate_url: "http://192.168.0.138:5000"
+  # Frigate's unauthenticated API port, reachable from the panel on your LAN
+  frigate_url: "http://FRIGRATE_IP_ADDRESS:5000"
 
-  # Camera tiles: entity_id + the label shown on the tile
+  # ------------------------------------------------------------ status bar --
+  temp_entity: sensor.blink_garden_1_temperature
+
+  # --------------------------------------------------- PAGE 1: lights/plugs --
+  # Any toggleable entity: light.*, switch.*, fan.*, input_boolean.* ...
+  ctl1_entity: light.office_light
+  ctl1_label: "Office Light"
+  ctl1_icon: "\U000F0769"        # ceiling-light
+
+  # A cover, so it is toggled with cover.toggle and its state is read as text
+  # (open/closed/opening/closing) rather than as an on/off binary_sensor.
+  ctl2_entity: cover.office_blinds
+  ctl2_label: "Office Blinds"
+  ctl2_icon: "\U000F00AC"        # blinds
+
+  ctl3_entity: switch.lamp_socket
+  ctl3_label: "Phone Charger"
+  ctl3_icon: "\U000F1397"        # cellphone-charging
+
+  # A script, so it is fired with script.turn_on -- homeassistant.toggle would
+  # STOP it if it happened to be running.
+  ctl4_entity: script.heating_boost_1_hour
+  ctl4_label: "Boost Heating"
+  ctl4_icon: "\U000F0E03"        # thermometer-chevron-up
+
+  # ------------------------------------------------------- PAGE 2: cameras --
+  # Home Assistant camera entity_ids. The panel reads each one's camera_name
+  # attribute over the API and streams that camera from Frigate.
   cam1_entity: camera.back_garden
   cam1_label: "Back Garden"
+  cam1_icon: "\U000F07AE"        # cctv
+
   cam2_entity: camera.doorbell_2
   cam2_label: "Doorbell"
+  cam2_icon: "\U000F0869"        # doorbell-video
+
   cam3_entity: camera.kitchen
   cam3_label: "Kitchen"
+  cam3_icon: "\U000F0290"        # fridge
+
   cam4_entity: camera.living_room
   cam4_label: "Living Room"
+  cam4_icon: "\U000F04B9"        # sofa
 
-  # Control tiles: any switchable entity (light.*, switch.*, fan.*, input_boolean.*)
-  ctl1_entity: light.kitchen_lights
-  ctl1_label: "Kitchen Lights"
-  ctl2_entity: light.hall_light
-  ctl2_label: "Hall Light"
-  ctl3_entity: light.living_room_lamp
-  ctl3_label: "Living Room Lamp"
-  ctl4_entity: switch.coffee_machine
-  ctl4_label: "Coffee Machine"
+  wifi_icon: "\U000F05A9"        # wifi
 
-  # Theme
-  col_bg: "0x101014"
-  col_tile: "0x1E1E28"
-  col_tile_on: "0x2E5C8A"
-  col_cam: "0x243040"
-  col_text: "0xE8E8F0"
-  col_accent: "0x4A9EFF"
+  # ------------------------------------------------------------------ video --
+  stream_fps: "10"          # more than the panel can draw only adds latency
+  stream_height: "450"      # 450 -> 800 wide on a 16:9 camera. 360 if choppy.
+
+  # ------------------------------------------------------------------ look --
+  page1_name: "OFFICE"
+  page2_name: "CAMERAS"
+  icon_size: "72"           # tile icons
+  label_font: montserrat_24 # tile labels
+  bar_font: montserrat_22   # temperature and clock
+  nav_font: montserrat_20   # page-switcher buttons
+
+  col_bg: "0x0A0D11"        # page background, near black
+  col_tile: "0x3A4046"      # tile, off - neutral grey, no blue/green tint
+  col_tile_on: "0xF07A14"   # tile, on - orange. 0xF58D10 is a touch warmer,
+  # 0xE86A0C deeper. Yellow starts around 0xE0A32E.
+  col_text: "0xFFFFFF"      # plain white - the mint was the grey/green tone
+  col_text_on: "0x14100A"   # text on an orange tile
+  col_dim: "0xA9B1B6"       # inactive page-switcher
 
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
 
-# -----------------------------------------------------------------------------
-# ESP32-P4 platform
-# -----------------------------------------------------------------------------
+# =============================================================================
+# Hardware - you should not need to change anything below this line
+# =============================================================================
+
 esp32:
   variant: esp32p4
   flash_size: 16MB
@@ -68,27 +108,23 @@ esp32:
       enable_idf_experimental_features: true
       execute_from_psram: true
     sdkconfig_options:
-      # TLS handshakes to Home Assistant can overflow the default main stack
       CONFIG_ESP_MAIN_TASK_STACK_SIZE: "8192"
       CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
       # ESP-Hosted can fail to allocate its internal DMA pool on P4 display
       # builds ("mempool create failed"); use dynamic buffers in PSRAM instead
       CONFIG_ESP_HOSTED_USE_MEMPOOL: "n"
       CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM: "y"
-      # Flash erase during OTA can outrun the default watchdog on this panel
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"
 
 psram:
   speed: 200MHz
 
-# LDO channel 3 powers the MIPI-DSI PHY. The display will not come up without it.
+# LDO channel 3 powers the MIPI-DSI PHY. The display is dead without it.
 esp_ldo:
   - channel: 3
     voltage: 2.5V
 
-# -----------------------------------------------------------------------------
-# Wi-Fi via the onboard ESP32-C6 co-processor (SDIO)
-# -----------------------------------------------------------------------------
+# Wi-Fi runs on the onboard ESP32-C6 over SDIO
 esp32_hosted:
   variant: ESP32C6
   active_high: true
@@ -124,9 +160,6 @@ time:
   - platform: homeassistant
     id: ha_time
 
-# -----------------------------------------------------------------------------
-# Display, touch, backlight
-# -----------------------------------------------------------------------------
 i2c:
   sda: GPIO7
   scl: GPIO8
@@ -160,23 +193,26 @@ touchscreen:
     id: panel_touch
     display: panel_display
 
-# -----------------------------------------------------------------------------
-# Live camera streams
-# -----------------------------------------------------------------------------
+# =============================================================================
+# Live camera component
+# =============================================================================
 external_components:
   - source:
-      type: local
-      path: components
+      type: git
+      url: https://github.com/derekmcauley7/ha_live_camera
     components: [ha_live_camera]
+    # Re-clones every build. Remove once you stop changing the component.
+    refresh: 0s
 
 ha_live_camera:
   id: live_cams
   frigate_url: "${frigate_url}"
-  fps: 15
-  stream_height: 270   # Frigate derives width from each camera's aspect ratio
-  max_width: 480
-  max_height: 272      # 270 rounds up to the JPEG engine's 16px MCU boundary
+  fps: ${stream_fps}
+  stream_height: ${stream_height}
+  max_width: 800          # must be a multiple of 16
+  max_height: 464         # 450 rounds up to the JPEG engine's 16px MCU size
   max_frame_bytes: 128kB
+  rgb_order: bgr          # try "rgb" if colours look wrong
   cameras:
     - entity_id: ${cam1_entity}
       name: "${cam1_label}"
@@ -187,15 +223,36 @@ ha_live_camera:
     - entity_id: ${cam4_entity}
       name: "${cam4_label}"
   on_frame:
-    - lvgl.widget.redraw: cam_img
+    # Re-issuing src is what hands LVGL the current frame. Invalidating alone
+    # redraws whatever descriptor it captured when the widget was created.
+    - lvgl.image.update:
+        id: cam_img
+        src: live_cams
   on_status:
     - lvgl.label.update:
         id: cam_status
         text: !lambda 'return x;'
 
-# -----------------------------------------------------------------------------
-# Live state of the four control entities
-# -----------------------------------------------------------------------------
+# =============================================================================
+# Outside temperature -> both status bars
+# =============================================================================
+sensor:
+  - platform: homeassistant
+    id: outside_temp
+    entity_id: ${temp_entity}
+    on_value:
+      - lvgl.label.update:
+          id: temp_p1
+          text: !lambda |-
+            char b[12]; snprintf(b, sizeof(b), "%.0f°", x); return std::string(b);
+      - lvgl.label.update:
+          id: temp_p2
+          text: !lambda |-
+            char b[12]; snprintf(b, sizeof(b), "%.0f°", x); return std::string(b);
+
+# =============================================================================
+# State of the four control entities
+# =============================================================================
 binary_sensor:
   - platform: homeassistant
     id: ctl1_state
@@ -205,14 +262,13 @@ binary_sensor:
       - lvgl.widget.update:
           id: ctl1_tile
           bg_color: !lambda 'return x ? lv_color_hex(${col_tile_on}) : lv_color_hex(${col_tile});'
-  - platform: homeassistant
-    id: ctl2_state
-    entity_id: ${ctl2_entity}
-    trigger_on_initial_state: true
-    on_state:
-      - lvgl.widget.update:
-          id: ctl2_tile
-          bg_color: !lambda 'return x ? lv_color_hex(${col_tile_on}) : lv_color_hex(${col_tile});'
+      # Text and icon flip to dark so they stay readable on amber
+      - lvgl.label.update:
+          id: ctl1_ic
+          text_color: !lambda 'return x ? lv_color_hex(${col_text_on}) : lv_color_hex(${col_text});'
+      - lvgl.label.update:
+          id: ctl1_tx
+          text_color: !lambda 'return x ? lv_color_hex(${col_text_on}) : lv_color_hex(${col_text});'
   - platform: homeassistant
     id: ctl3_state
     entity_id: ${ctl3_entity}
@@ -221,6 +277,13 @@ binary_sensor:
       - lvgl.widget.update:
           id: ctl3_tile
           bg_color: !lambda 'return x ? lv_color_hex(${col_tile_on}) : lv_color_hex(${col_tile});'
+      # Text and icon flip to dark so they stay readable on amber
+      - lvgl.label.update:
+          id: ctl3_ic
+          text_color: !lambda 'return x ? lv_color_hex(${col_text_on}) : lv_color_hex(${col_text});'
+      - lvgl.label.update:
+          id: ctl3_tx
+          text_color: !lambda 'return x ? lv_color_hex(${col_text_on}) : lv_color_hex(${col_text});'
   - platform: homeassistant
     id: ctl4_state
     entity_id: ${ctl4_entity}
@@ -229,12 +292,34 @@ binary_sensor:
       - lvgl.widget.update:
           id: ctl4_tile
           bg_color: !lambda 'return x ? lv_color_hex(${col_tile_on}) : lv_color_hex(${col_tile});'
+      # Text and icon flip to dark so they stay readable on amber
+      - lvgl.label.update:
+          id: ctl4_ic
+          text_color: !lambda 'return x ? lv_color_hex(${col_text_on}) : lv_color_hex(${col_text});'
+      - lvgl.label.update:
+          id: ctl4_tx
+          text_color: !lambda 'return x ? lv_color_hex(${col_text_on}) : lv_color_hex(${col_text});'
 
-# -----------------------------------------------------------------------------
-# Camera page plumbing
-# -----------------------------------------------------------------------------
+# The blinds report open/closed/opening/closing, not on/off.
+text_sensor:
+  - platform: homeassistant
+    id: ctl2_state
+    entity_id: ${ctl2_entity}
+    on_value:
+      - lvgl.widget.update:
+          id: ctl2_tile
+          bg_color: !lambda 'return (x == "open" || x == "opening") ? lv_color_hex(${col_tile_on}) : lv_color_hex(${col_tile});'
+      - lvgl.label.update:
+          id: ctl2_ic
+          text_color: !lambda 'return (x == "open" || x == "opening") ? lv_color_hex(${col_text_on}) : lv_color_hex(${col_text});'
+      - lvgl.label.update:
+          id: ctl2_tx
+          text_color: !lambda 'return (x == "open" || x == "opening") ? lv_color_hex(${col_text_on}) : lv_color_hex(${col_text});'
+
+# =============================================================================
+# Camera page plumbing + clock
+# =============================================================================
 script:
-  # Open the camera page and start streaming camera `idx` (0-based).
   - id: open_camera
     parameters:
       idx: int
@@ -248,16 +333,29 @@ script:
           id: live_cams
           index: !lambda 'return idx;'
 
-  # Stop the stream and go back to the grid. Only one stream is ever active.
   - id: close_camera
     then:
       - ha_live_camera.stop: live_cams
-      - lvgl.page.show: home_page
+      - lvgl.page.show: cameras_page
 
 interval:
-  # Frame-rate readout in the status bar.
   - interval: 1s
     then:
+      # Clock, on both status bars
+      - lvgl.label.update:
+          id: time_p1
+          text: !lambda |-
+            auto t = id(ha_time).now();
+            if (!t.is_valid()) return std::string("--:--");
+            char b[8]; snprintf(b, sizeof(b), "%02d:%02d", t.hour, t.minute);
+            return std::string(b);
+      - lvgl.label.update:
+          id: time_p2
+          text: !lambda |-
+            auto t = id(ha_time).now();
+            if (!t.is_valid()) return std::string("--:--");
+            char b[8]; snprintf(b, sizeof(b), "%02d:%02d", t.hour, t.minute);
+            return std::string(b);
       - if:
           condition:
             lambda: 'return id(live_cams).active_index() >= 0;'
@@ -269,233 +367,493 @@ interval:
                   snprintf(buf, sizeof(buf), "%.1f FPS", id(live_cams).measured_fps());
                   return std::string(buf);
 
-# -----------------------------------------------------------------------------
+# =============================================================================
+# Icon font
+# =============================================================================
+# Every icon used above appears here too -- both read the same substitution,
+# so changing one at the top changes both.
+font:
+  - file: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/v7.4.47/fonts/materialdesignicons-webfont.ttf"
+    id: icon_font
+    size: ${icon_size}
+    bpp: 4
+    glyphs:
+      - ${ctl1_icon}
+      - ${ctl2_icon}
+      - ${ctl3_icon}
+      - ${ctl4_icon}
+      - ${cam1_icon}
+      - ${cam2_icon}
+      - ${cam3_icon}
+      - ${cam4_icon}
+  - file: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/v7.4.47/fonts/materialdesignicons-webfont.ttf"
+    id: status_font
+    size: 26
+    bpp: 4
+    glyphs:
+      - ${wifi_icon}
+
+# =============================================================================
 # UI
-# -----------------------------------------------------------------------------
+# =============================================================================
 lvgl:
   id: main_lvgl
   displays: panel_display
   touchscreens: panel_touch
   buffer_size: 100%
   byte_order: little_endian
+  # 480x800 panel driven as 800x480. Use 270 if it comes up upside down.
+  rotation: 90
   bg_color: ${col_bg}
 
-  # Reusable tile look
   style_definitions:
     - id: tile_style
       bg_opa: cover
       border_width: 0
-      radius: 12
-      pad_all: 10
+      radius: 16
+      pad_all: 16
       text_color: ${col_text}
 
   pages:
-    # -------------------------------------------------------------- home grid
-    - id: home_page
+    - id: controls_page
       bg_color: ${col_bg}
       bg_opa: cover
       scrollbar_mode: "off"
-      pad_all: 8
+      pad_all: 12
+      # Swipe either way to reach the other page.
+      # lv_indev_wait_release() stops LVGL delivering anything else
+      # from this touch, so the tile underneath never gets its click.
+      on_swipe_left:
+        - lambda: "lv_indev_wait_release(lv_indev_active());"
+        - lvgl.page.show: cameras_page
+      on_swipe_right:
+        - lambda: "lv_indev_wait_release(lv_indev_active());"
+        - lvgl.page.show: cameras_page
       layout:
         type: grid
         grid_columns: [FR(1), FR(1)]
-        grid_rows: [FR(1), FR(1), FR(1), FR(1)]
-        pad_row: 8
-        pad_column: 8
+        # status bar, two rows of tiles, page switcher
+        grid_rows: [30, FR(1), FR(1), 54]
+        pad_row: 10
+        pad_column: 10
       widgets:
-        # --- camera tiles ---
-        - button:
-            id: cam1_tile
-            styles: tile_style
-            bg_color: ${col_cam}
+        - obj:
             grid_cell_column_pos: 0
             grid_cell_row_pos: 0
+            grid_cell_column_span: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            bg_opa: transp
+            border_width: 0
+            pad_all: 0
+            clickable: false
             widgets:
               - label:
-                  align: top_left
-                  text_color: ${col_accent}
-                  text: "CAMERA"
+                  id: temp_p1
+                  align: left_mid
+                  text_font: ${bar_font}
+                  text_color: ${col_text}
+                  text: "--°"
               - label:
-                  align: bottom_left
-                  width: 100%
-                  long_mode: wrap
-                  text_font: montserrat_20
-                  text: "${cam1_label}"
-            on_short_click:
-              - script.execute:
-                  id: open_camera
-                  idx: 0
-                  title: "${cam1_label}"
-
-        - button:
-            id: cam2_tile
-            styles: tile_style
-            bg_color: ${col_cam}
-            grid_cell_column_pos: 1
-            grid_cell_row_pos: 0
-            widgets:
+                  id: time_p1
+                  align: center
+                  text_font: ${bar_font}
+                  text_color: ${col_text}
+                  text: "--:--"
               - label:
-                  align: top_left
-                  text_color: ${col_accent}
-                  text: "CAMERA"
-              - label:
-                  align: bottom_left
-                  width: 100%
-                  long_mode: wrap
-                  text_font: montserrat_20
-                  text: "${cam2_label}"
-            on_short_click:
-              - script.execute:
-                  id: open_camera
-                  idx: 1
-                  title: "${cam2_label}"
-
-        - button:
-            id: cam3_tile
-            styles: tile_style
-            bg_color: ${col_cam}
-            grid_cell_column_pos: 0
-            grid_cell_row_pos: 1
-            widgets:
-              - label:
-                  align: top_left
-                  text_color: ${col_accent}
-                  text: "CAMERA"
-              - label:
-                  align: bottom_left
-                  width: 100%
-                  long_mode: wrap
-                  text_font: montserrat_20
-                  text: "${cam3_label}"
-            on_short_click:
-              - script.execute:
-                  id: open_camera
-                  idx: 2
-                  title: "${cam3_label}"
-
-        - button:
-            id: cam4_tile
-            styles: tile_style
-            bg_color: ${col_cam}
-            grid_cell_column_pos: 1
-            grid_cell_row_pos: 1
-            widgets:
-              - label:
-                  align: top_left
-                  text_color: ${col_accent}
-                  text: "CAMERA"
-              - label:
-                  align: bottom_left
-                  width: 100%
-                  long_mode: wrap
-                  text_font: montserrat_20
-                  text: "${cam4_label}"
-            on_short_click:
-              - script.execute:
-                  id: open_camera
-                  idx: 3
-                  title: "${cam4_label}"
-
-        # --- control tiles ---
+                  align: right_mid
+                  text_font: status_font
+                  text_color: ${col_text}
+                  text: "${wifi_icon}"
         - button:
             id: ctl1_tile
             styles: tile_style
             bg_color: ${col_tile}
             grid_cell_column_pos: 0
-            grid_cell_row_pos: 2
+            grid_cell_row_pos: 1
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            gesture_bubble: true
             widgets:
               - label:
+                  id: ctl1_ic
+                  align: top_left
+                  text_font: icon_font
+                  text_color: ${col_text}
+                  text: "${ctl1_icon}"
+              - label:
+                  id: ctl1_tx
                   align: bottom_left
                   width: 100%
-                  long_mode: wrap
-                  text_font: montserrat_20
+                  long_mode: dot
+                  text_font: ${label_font}
+                  text_color: ${col_text}
                   text: "${ctl1_label}"
-            on_short_click:
+            on_click:
               - homeassistant.action:
                   action: homeassistant.toggle
                   data:
                     entity_id: ${ctl1_entity}
-
         - button:
             id: ctl2_tile
             styles: tile_style
             bg_color: ${col_tile}
             grid_cell_column_pos: 1
-            grid_cell_row_pos: 2
+            grid_cell_row_pos: 1
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            gesture_bubble: true
             widgets:
               - label:
+                  id: ctl2_ic
+                  align: top_left
+                  text_font: icon_font
+                  text_color: ${col_text}
+                  text: "${ctl2_icon}"
+              - label:
+                  id: ctl2_tx
                   align: bottom_left
                   width: 100%
-                  long_mode: wrap
-                  text_font: montserrat_20
+                  long_mode: dot
+                  text_font: ${label_font}
+                  text_color: ${col_text}
                   text: "${ctl2_label}"
-            on_short_click:
+            on_click:
               - homeassistant.action:
-                  action: homeassistant.toggle
+                  action: cover.toggle
                   data:
                     entity_id: ${ctl2_entity}
-
         - button:
             id: ctl3_tile
             styles: tile_style
             bg_color: ${col_tile}
             grid_cell_column_pos: 0
-            grid_cell_row_pos: 3
+            grid_cell_row_pos: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            gesture_bubble: true
             widgets:
               - label:
+                  id: ctl3_ic
+                  align: top_left
+                  text_font: icon_font
+                  text_color: ${col_text}
+                  text: "${ctl3_icon}"
+              - label:
+                  id: ctl3_tx
                   align: bottom_left
                   width: 100%
-                  long_mode: wrap
-                  text_font: montserrat_20
+                  long_mode: dot
+                  text_font: ${label_font}
+                  text_color: ${col_text}
                   text: "${ctl3_label}"
-            on_short_click:
+            on_click:
               - homeassistant.action:
                   action: homeassistant.toggle
                   data:
                     entity_id: ${ctl3_entity}
-
         - button:
             id: ctl4_tile
             styles: tile_style
             bg_color: ${col_tile}
             grid_cell_column_pos: 1
-            grid_cell_row_pos: 3
+            grid_cell_row_pos: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            gesture_bubble: true
             widgets:
               - label:
+                  id: ctl4_ic
+                  align: top_left
+                  text_font: icon_font
+                  text_color: ${col_text}
+                  text: "${ctl4_icon}"
+              - label:
+                  id: ctl4_tx
                   align: bottom_left
                   width: 100%
-                  long_mode: wrap
-                  text_font: montserrat_20
+                  long_mode: dot
+                  text_font: ${label_font}
+                  text_color: ${col_text}
                   text: "${ctl4_label}"
-            on_short_click:
+            on_click:
               - homeassistant.action:
-                  action: homeassistant.toggle
+                  action: script.turn_on
                   data:
                     entity_id: ${ctl4_entity}
+        - button:
+            grid_cell_column_pos: 0
+            grid_cell_row_pos: 3
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            bg_color: ${col_tile_on}
+            bg_opa: cover
+            radius: 12
+            border_width: 0
+            pad_all: 0
+            gesture_bubble: true
+            widgets:
+              - label:
+                  align: center
+                  text_font: ${nav_font}
+                  text_color: ${col_text_on}
+                  text: "${page1_name}"
+        - button:
+            grid_cell_column_pos: 1
+            grid_cell_row_pos: 3
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            bg_color: ${col_tile}
+            bg_opa: cover
+            radius: 12
+            border_width: 0
+            pad_all: 0
+            gesture_bubble: true
+            widgets:
+              - label:
+                  align: center
+                  text_font: ${nav_font}
+                  text_color: ${col_dim}
+                  text: "${page2_name}"
+            on_click:
+              - lvgl.page.show: cameras_page
 
-    # ------------------------------------------------------------ camera page
+    - id: cameras_page
+      bg_color: ${col_bg}
+      bg_opa: cover
+      scrollbar_mode: "off"
+      pad_all: 12
+      # Swipe either way to reach the other page.
+      # lv_indev_wait_release() stops LVGL delivering anything else
+      # from this touch, so the tile underneath never gets its click.
+      on_swipe_left:
+        - lambda: "lv_indev_wait_release(lv_indev_active());"
+        - lvgl.page.show: controls_page
+      on_swipe_right:
+        - lambda: "lv_indev_wait_release(lv_indev_active());"
+        - lvgl.page.show: controls_page
+      layout:
+        type: grid
+        grid_columns: [FR(1), FR(1)]
+        # status bar, two rows of tiles, page switcher
+        grid_rows: [30, FR(1), FR(1), 54]
+        pad_row: 10
+        pad_column: 10
+      widgets:
+        - obj:
+            grid_cell_column_pos: 0
+            grid_cell_row_pos: 0
+            grid_cell_column_span: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            bg_opa: transp
+            border_width: 0
+            pad_all: 0
+            clickable: false
+            widgets:
+              - label:
+                  id: temp_p2
+                  align: left_mid
+                  text_font: ${bar_font}
+                  text_color: ${col_text}
+                  text: "--°"
+              - label:
+                  id: time_p2
+                  align: center
+                  text_font: ${bar_font}
+                  text_color: ${col_text}
+                  text: "--:--"
+              - label:
+                  align: right_mid
+                  text_font: status_font
+                  text_color: ${col_text}
+                  text: "${wifi_icon}"
+        - button:
+            id: cam1_tile
+            styles: tile_style
+            bg_color: ${col_tile}
+            grid_cell_column_pos: 0
+            grid_cell_row_pos: 1
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            gesture_bubble: true
+            widgets:
+              - label:
+                  id: cam1_ic
+                  align: top_left
+                  text_font: icon_font
+                  text_color: ${col_text}
+                  text: "${cam1_icon}"
+              - label:
+                  id: cam1_tx
+                  align: bottom_left
+                  width: 100%
+                  long_mode: dot
+                  text_font: ${label_font}
+                  text_color: ${col_text}
+                  text: "${cam1_label}"
+            on_click:
+              - script.execute:
+                  id: open_camera
+                  idx: 0
+                  title: "${cam1_label}"
+        - button:
+            id: cam2_tile
+            styles: tile_style
+            bg_color: ${col_tile}
+            grid_cell_column_pos: 1
+            grid_cell_row_pos: 1
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            gesture_bubble: true
+            widgets:
+              - label:
+                  id: cam2_ic
+                  align: top_left
+                  text_font: icon_font
+                  text_color: ${col_text}
+                  text: "${cam2_icon}"
+              - label:
+                  id: cam2_tx
+                  align: bottom_left
+                  width: 100%
+                  long_mode: dot
+                  text_font: ${label_font}
+                  text_color: ${col_text}
+                  text: "${cam2_label}"
+            on_click:
+              - script.execute:
+                  id: open_camera
+                  idx: 1
+                  title: "${cam2_label}"
+        - button:
+            id: cam3_tile
+            styles: tile_style
+            bg_color: ${col_tile}
+            grid_cell_column_pos: 0
+            grid_cell_row_pos: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            gesture_bubble: true
+            widgets:
+              - label:
+                  id: cam3_ic
+                  align: top_left
+                  text_font: icon_font
+                  text_color: ${col_text}
+                  text: "${cam3_icon}"
+              - label:
+                  id: cam3_tx
+                  align: bottom_left
+                  width: 100%
+                  long_mode: dot
+                  text_font: ${label_font}
+                  text_color: ${col_text}
+                  text: "${cam3_label}"
+            on_click:
+              - script.execute:
+                  id: open_camera
+                  idx: 2
+                  title: "${cam3_label}"
+        - button:
+            id: cam4_tile
+            styles: tile_style
+            bg_color: ${col_tile}
+            grid_cell_column_pos: 1
+            grid_cell_row_pos: 2
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            gesture_bubble: true
+            widgets:
+              - label:
+                  id: cam4_ic
+                  align: top_left
+                  text_font: icon_font
+                  text_color: ${col_text}
+                  text: "${cam4_icon}"
+              - label:
+                  id: cam4_tx
+                  align: bottom_left
+                  width: 100%
+                  long_mode: dot
+                  text_font: ${label_font}
+                  text_color: ${col_text}
+                  text: "${cam4_label}"
+            on_click:
+              - script.execute:
+                  id: open_camera
+                  idx: 3
+                  title: "${cam4_label}"
+        - button:
+            grid_cell_column_pos: 0
+            grid_cell_row_pos: 3
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            bg_color: ${col_tile}
+            bg_opa: cover
+            radius: 12
+            border_width: 0
+            pad_all: 0
+            gesture_bubble: true
+            widgets:
+              - label:
+                  align: center
+                  text_font: ${nav_font}
+                  text_color: ${col_dim}
+                  text: "${page1_name}"
+            on_click:
+              - lvgl.page.show: controls_page
+        - button:
+            grid_cell_column_pos: 1
+            grid_cell_row_pos: 3
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            bg_color: ${col_tile_on}
+            bg_opa: cover
+            radius: 12
+            border_width: 0
+            pad_all: 0
+            gesture_bubble: true
+            widgets:
+              - label:
+                  align: center
+                  text_font: ${nav_font}
+                  text_color: ${col_text_on}
+                  text: "${page2_name}"
+
+    # Live video. skip: true keeps it out of the swipe rotation.
     - id: camera_page
+      skip: true
       bg_color: "0x000000"
       bg_opa: cover
       scrollbar_mode: "off"
       widgets:
-        # header
+        # Declared first so the controls below paint on top of it.
+        - image:
+            id: cam_img
+            src: live_cams
+            x: 0
+            y: 15
+            width: 800
+            height: 450
+
         - label:
             id: cam_title
-            x: 12
-            y: 14
+            x: 14
+            y: 10
             text_font: montserrat_22
             text_color: ${col_text}
             text: "Camera"
+
         - button:
             id: cam_back
-            x: 360
+            x: 676
             y: 8
-            width: 108
-            height: 44
+            width: 110
+            height: 46
             bg_color: ${col_tile}
             bg_opa: cover
-            radius: 10
+            radius: 12
             border_width: 0
             widgets:
               - label:
@@ -503,26 +861,21 @@ lvgl:
                   text_color: ${col_text}
                   text_font: montserrat_20
                   text: "BACK"
-            on_short_click:
+            on_click:
               - script.execute: close_camera
 
-        # video / still area — this is the widget the live component replaces
-        - image:
-            id: cam_img
-            src: live_cams
-            x: 0
-            y: 200
-
-        # status bar
         - label:
             id: cam_status
-            x: 12
-            y: 760
-            text_color: ${col_accent}
+            x: 14
+            y: 452
+            text_font: montserrat_18
+            text_color: ${col_text}
             text: "Idle"
+
         - label:
             id: cam_fps
-            x: 370
-            y: 760
-            text_color: ${col_accent}
+            x: 682
+            y: 452
+            text_font: montserrat_18
+            text_color: ${col_text}
             text: "-- FPS"
