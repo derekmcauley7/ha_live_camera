@@ -381,6 +381,12 @@ bool HaLiveCamera::login_() {
     ESP_LOGE(TAG, "login rejected (HTTP %d) -- check username/password", code);
     return false;
   }
+  if (code == 400) {
+    // nginx answers a plain HTTP request on an HTTPS port with exactly this.
+    ESP_LOGE(TAG, "login returned HTTP 400 -- port 8971 is still serving HTTPS. "
+                  "Set \"tls: enabled: False\" in Frigate's config and restart it.");
+    return true;
+  }
   if (code != 200) {
     ESP_LOGW(TAG, "login returned HTTP %d", code);
     return true;
