@@ -117,6 +117,17 @@ class HaLiveCamera : public Component, public image::Image {
   void stop();
 
   size_t camera_count() const { return this->cameras_.size(); }
+  // True once Home Assistant has pushed a camera_name for every configured
+  // entity -- i.e. the panel could actually stream if asked. Used by the boot
+  // screen to know when it is safe to hand over to the UI.
+  bool cameras_ready() const {
+    if (this->cameras_.empty())
+      return false;
+    for (const auto &c : this->cameras_)
+      if (c.camera_name.empty())
+        return false;
+    return true;
+  }
   const std::string &display_name(size_t i) const { return this->cameras_[i].name; }
   int active_index() const { return this->active_index_.load(std::memory_order_relaxed); }
   StreamStatus status() const {
