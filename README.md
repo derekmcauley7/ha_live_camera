@@ -54,7 +54,9 @@ external_components:
 
 ha_live_camera:
   id: live_cams
-  frigate_url: "http://frigate.lan:5000"
+  frigate_url: "http://frigate.lan:8971"
+  username: !secret frigate_username
+  password: !secret frigate_password
   fps: 15
   stream_height: 270
   max_width: 480
@@ -75,27 +77,84 @@ Actions: `ha_live_camera.show` (0-based `index`, templatable) and `ha_live_camer
 
 **You configure Home Assistant entity IDs, not Frigate camera names.** The component subscribes to each entity's `camera_name` attribute over the ESPHome API connection Home Assistant already holds, so `camera.doorbell_2` resolves itself to Frigate's `doorbell` at runtime. Nothing needs to go in `configuration.yaml`, and no HA camera entities need creating.
 
-## Requirement: Frigate's port 5000
+## Connecting to Frigate: use port 8971, not 5000
 
-Frigate publishes `8971` (authenticated), `8554` (RTSP) and `8555` (WebRTC) by default — but **not 5000**, the unauthenticated API port this component uses. Add it to your compose:
+Frigate exposes two HTTP ports. **5000 is unauthenticated, and unauthenticated
+here does not mean read-only** — Frigate's docs state that on that port "all
+requests are treated as anonymous, granting access equivalent to the admin role
+without restrictions". Anything that can reach it can watch every camera, read
+your recordings, and rewrite your config. It is meant to be reachable only from
+inside the Docker network.
+
+So point this component at **8971** and give it a login.
+
+### 1. Turn off TLS on 8971
+
+8971 serves HTTPS with a self-signed certificate by default. Rather than ship a
+TLS stack and a cert bundle to the microcontroller, terminate the problem at
+source — in your Frigate config:
+
+```yaml
+tls:
+  enabled: False
+```
+
+8971 is then plain HTTP, still authenticated. If you also reach Frigate from
+outside your LAN, put a reverse proxy with a real certificate in front of it
+instead; the panel keeps talking to 8971 directly.
+
+### 2. Create a viewer user
+
+In Frigate: **Settings → Users → Add**, role **viewer**. A viewer can watch
+cameras and history but cannot open the config editor or change anything. Give
+the panel that account, never an admin one — then the worst a stolen panel can
+do is show someone your cameras, which they could see by looking at the screen
+anyway.
+
+Put the credentials in ESPHome's secrets, not in the YAML:
+
+```yaml
+frigate_username: "panel"
+frigate_password: "..."
+```
+
+### 3. Publish 8971 and unpublish 5000
 
 ```yaml
     ports:
-      - target: 5000
-        published: "5000"
+      - target: 8971
+        published: "8971"
         protocol: tcp
 ```
 
-and recreate the container. Verify:
+Delete any `5000` mapping you added earlier, then recreate the container.
+Verify from another machine:
 
 ```bash
-curl -s --max-time 10 "http://<frigate>:5000/api/<camera>?fps=15&height=270" \
+TOKEN=$(curl -s -i -X POST http://<frigate>:8971/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"user":"panel","password":"..."}' \
+  | grep -i '^set-cookie:' | sed 's/.*=//; s/;.*//')
+
+curl -s --max-time 10 -H "Authorization: Bearer $TOKEN" \
+  "http://<frigate>:8971/api/<camera>?fps=15&height=270" \
   | grep -aci "content-type: image/jpeg"
 ```
 
-Roughly `fps × 10` means it's working.
+Roughly `fps × 10` means it's working. A `401` means the credentials are wrong;
+an empty `$TOKEN` means TLS is still on and you reached an HTTPS port over HTTP.
 
-⚠️ **Port 5000 is unauthenticated.** Anyone on your LAN can view your cameras through it. Frigate's own docs say access "should be limited". If that's unacceptable, the component would need Frigate JWT login against port 8971 instead — not implemented here.
+### How the component handles the session
+
+`POST /api/login` returns an empty 200 — the JWT arrives only in `Set-Cookie`,
+so the component reads it out of the response headers and sends it back as
+`Authorization: Bearer <jwt>` on each stream request. Sessions last
+`auth.session_length` (24 hours by default). Rather than track expiry, a `401`
+on the stream simply clears the token and the next reconnect logs in again;
+only a rejected *login* is reported as `Authentication failed`.
+
+Omitting `username` still works against port 5000, for anyone who has a reason
+to prefer it. The component logs which mode it is in at startup.
 
 ## The parser, and why it's built the way it is
 
@@ -153,7 +212,8 @@ test/                   host unit tests + stream generator
 - [ESP-IDF `esp32p4/soc_caps.h`](https://github.com/espressif/esp-idf/blob/v5.5.4/components/soc/esp32p4/include/soc/soc_caps.h) — JPEG codec present, H.264 absent
 - [ESP-IDF JPEG decoder](https://docs.espressif.com/projects/esp-idf/en/latest/esp32p4/api-reference/peripherals/jpeg.html)
 - [Frigate `api/media.py`](https://github.com/blakeblackshear/frigate) — MJPEG feed, no Content-Length
-- [Frigate ports](https://docs.frigate.video/frigate/installation) — 5000 unauthenticated, 8971 authenticated
+- [Frigate authentication](https://docs.frigate.video/configuration/authentication) — roles, `/api/login`, `session_length`, and what port 5000 really grants
+- [Frigate TLS](https://docs.frigate.video/configuration/tls) — self-signed cert on 8971 and how to disable it
 - [HA `camera/__init__.py`](https://github.com/home-assistant/core/blob/dev/homeassistant/components/camera/__init__.py) — `MIN_STREAM_INTERVAL`, the 2 FPS fallback
 - [FFmpeg `mpjpeg.c`](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/mpjpeg.c) — lowercase header names
 - [ESPHome MIPI DSI](https://esphome.io/components/display/mipi_dsi/) — JC4880P443 panel model

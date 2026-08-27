@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "driver/jpeg_decode.h"
+#include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -97,6 +98,13 @@ class HaLiveCamera : public Component, public image::Image {
   // what LVGL wants when LV_COLOR_16_SWAP is 0 (ESPHome's little_endian).
   void set_rgb_order_bgr(bool bgr) { this->rgb_order_bgr_ = bgr; }
   void set_task_priority(uint8_t p) { this->task_priority_ = p; }
+  // Frigate's authenticated port (8971). Leave empty to talk to the
+  // unauthenticated port 5000, which grants admin-equivalent access to anyone
+  // who can reach it -- see the README.
+  void set_credentials(const std::string &user, const std::string &pass) {
+    this->username_ = user;
+    this->password_ = pass;
+  }
 
   void add_frame_trigger(Trigger<> *t) { this->frame_triggers_.push_back(t); }
   void add_status_trigger(Trigger<std::string> *t) { this->status_triggers_.push_back(t); }
@@ -130,7 +138,13 @@ class HaLiveCamera : public Component, public image::Image {
   // Publish an all-black frame so a camera switch never shows the
   // previous camera while the new one is connecting.
   void blank_display_();
+  std::string base_url_() const;
   std::string build_url_(const CameraEntry &c) const;
+
+  // POST /api/login and keep the JWT out of the Set-Cookie header. Returns
+  // false only when Frigate actively rejected the credentials.
+  bool login_();
+  static esp_err_t login_event_(esp_http_client_event_t *evt);
 
   std::string frigate_url_;
   uint8_t stream_fps_{15};
@@ -142,6 +156,12 @@ class HaLiveCamera : public Component, public image::Image {
   uint32_t max_frame_bytes_{128 * 1024};
   uint8_t task_priority_{5};
   bool rgb_order_bgr_{true};
+
+  std::string username_;
+  std::string password_;
+  // Session token from /api/login. Default lifetime is 24h (auth.session_length);
+  // rather than track expiry we just re-login when a stream comes back 401.
+  std::string jwt_;
 
   // Triple-buffered so the decoder never writes the buffer LVGL is drawing
   // from: the task only picks a buffer that is neither the most recently

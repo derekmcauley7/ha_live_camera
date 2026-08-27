@@ -35,6 +35,8 @@ CONF_ON_FRAME = "on_frame"
 CONF_ON_STATUS = "on_status"
 CONF_TASK_PRIORITY = "task_priority"
 CONF_RGB_ORDER = "rgb_order"
+CONF_USERNAME = "username"
+CONF_PASSWORD = "password"
 
 ha_live_camera_ns = cg.esphome_ns.namespace("ha_live_camera")
 HaLiveCamera = ha_live_camera_ns.class_("HaLiveCamera", cg.Component, image.Image_)
@@ -94,6 +96,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_MAX_FRAME_BYTES, default="128kB"): cv.validate_bytes,
             cv.Optional(CONF_TASK_PRIORITY, default=5): cv.int_range(min=1, max=20),
             cv.Optional(CONF_RGB_ORDER, default="bgr"): cv.one_of("rgb", "bgr", lower=True),
+            # Frigate's authenticated port (8971). Omit both to talk to the
+            # unauthenticated port 5000, which hands admin-equivalent access to
+            # anything that can reach it.
+            cv.Optional(CONF_USERNAME): cv.string_strict,
+            cv.Optional(CONF_PASSWORD): cv.string_strict,
             cv.Optional(CONF_ON_FRAME): automation.validate_automation(
                 {
                     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
@@ -124,6 +131,8 @@ async def to_code(config):
     cg.add(var.set_max_frame_bytes(config[CONF_MAX_FRAME_BYTES]))
     cg.add(var.set_task_priority(config[CONF_TASK_PRIORITY]))
     cg.add(var.set_rgb_order_bgr(config[CONF_RGB_ORDER] == "bgr"))
+    if CONF_USERNAME in config:
+        cg.add(var.set_credentials(config[CONF_USERNAME], config.get(CONF_PASSWORD, "")))
 
     # LVGL inspects image metadata at codegen time to decide which colour
     # formats to compile in. Register ours as an opaque RGB565 image of the
