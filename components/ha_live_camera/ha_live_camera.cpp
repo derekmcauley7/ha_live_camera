@@ -5,6 +5,7 @@
 #include "esphome/core/log.h"
 
 #include <cstring>
+#include <strings.h>
 
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -138,6 +139,9 @@ void HaLiveCamera::dump_config() {
                 (unsigned) this->max_height_, (unsigned) this->fb_size_, (unsigned) NUM_FB);
   ESP_LOGCONFIG(TAG, "  Max JPEG:  %u bytes", (unsigned) this->jpeg_in_size_);
   ESP_LOGCONFIG(TAG, "  RGB order: %s", this->rgb_order_bgr_ ? "BGR (little endian)" : "RGB (big endian)");
+  ESP_LOGCONFIG(TAG, "  Auth:      %s", this->username_.empty()
+                                            ? "none (unauthenticated port 5000)"
+                                            : this->username_.c_str());
   for (size_t i = 0; i < this->cameras_.size(); i++) {
     ESP_LOGCONFIG(TAG, "  Camera %u: %s (%s)", (unsigned) i, this->cameras_[i].name.c_str(),
                   this->cameras_[i].entity_id.c_str());
@@ -292,13 +296,109 @@ void HaLiveCamera::blank_display_() {
   this->ready_index_.store(target, std::memory_order_release);
 }
 
-std::string HaLiveCamera::build_url_(const CameraEntry &c) const {
-  // Frigate serves MJPEG straight off its already-decoded detect stream, so
-  // there is no transcoding anywhere in the chain. Port 5000 is Frigate's
-  // unauthenticated API, so no credentials are involved.
+std::string HaLiveCamera::base_url_() const {
   std::string url = this->frigate_url_;
   if (!url.empty() && url.back() == '/')
     url.pop_back();
+  return url;
+}
+
+// Frigate answers /api/login with an empty 200 body -- the JWT is only in the
+// Set-Cookie header, so we have to read headers as they arrive.
+esp_err_t HaLiveCamera::login_event_(esp_http_client_event_t *evt) {
+  if (evt->event_id != HTTP_EVENT_ON_HEADER)
+    return ESP_OK;
+  if (evt->header_key == nullptr || evt->header_value == nullptr)
+    return ESP_OK;
+  if (strcasecmp(evt->header_key, "Set-Cookie") != 0)
+    return ESP_OK;
+  auto *self = static_cast<HaLiveCamera *>(evt->user_data);
+  if (self == nullptr)
+    return ESP_OK;
+  // "frigate_token=eyJhbGci...; Path=/; HttpOnly". Take the value whatever the
+  // cookie is called -- auth.cookie_name is configurable.
+  const char *eq = strchr(evt->header_value, '=');
+  if (eq == nullptr)
+    return ESP_OK;
+  const char *start = eq + 1;
+  const char *end = strchr(start, ';');
+  const size_t len = (end != nullptr) ? static_cast<size_t>(end - start) : strlen(start);
+  if (len == 0)
+    return ESP_OK;
+  self->jwt_.assign(start, len);
+  return ESP_OK;
+}
+
+// Minimal JSON string escaping -- a password may legitimately contain a quote
+// or a backslash, and anything else we would rather send verbatim.
+static void json_escape_into(const std::string &in, std::string &out) {
+  for (char ch : in) {
+    if (ch == '"' || ch == '\\')
+      out += '\\';
+    out += ch;
+  }
+}
+
+bool HaLiveCamera::login_() {
+  if (this->username_.empty())
+    return true;  // unauthenticated port -- nothing to do
+
+  std::string url = this->base_url_();
+  url += "/api/login";
+
+  std::string body = "{\"user\":\"";
+  json_escape_into(this->username_, body);
+  body += "\",\"password\":\"";
+  json_escape_into(this->password_, body);
+  body += "\"}";
+
+  esp_http_client_config_t cfg = {};
+  cfg.url = url.c_str();
+  cfg.method = HTTP_METHOD_POST;
+  cfg.timeout_ms = 5000;
+  cfg.buffer_size = 1024;
+  cfg.buffer_size_tx = 1024;
+  cfg.event_handler = HaLiveCamera::login_event_;
+  cfg.user_data = this;
+
+  esp_http_client_handle_t client = esp_http_client_init(&cfg);
+  if (client == nullptr)
+    return true;  // transient; let the caller retry rather than latch a failure
+
+  esp_http_client_set_header(client, "Content-Type", "application/json");
+  esp_http_client_set_post_field(client, body.c_str(), body.size());
+
+  this->jwt_.clear();
+  const esp_err_t err = esp_http_client_perform(client);
+  const int code = esp_http_client_get_status_code(client);
+  esp_http_client_cleanup(client);
+
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "login transport error: %s", esp_err_to_name(err));
+    return true;  // network problem, not a credential problem
+  }
+  if (code == 401 || code == 403) {
+    ESP_LOGE(TAG, "login rejected (HTTP %d) -- check username/password", code);
+    return false;
+  }
+  if (code != 200) {
+    ESP_LOGW(TAG, "login returned HTTP %d", code);
+    return true;
+  }
+  if (this->jwt_.empty()) {
+    ESP_LOGW(TAG, "login succeeded but no session cookie came back");
+    return true;
+  }
+  ESP_LOGI(TAG, "logged in to frigate as %s", this->username_.c_str());
+  return true;
+}
+
+std::string HaLiveCamera::build_url_(const CameraEntry &c) const {
+  // Frigate serves MJPEG straight off its already-decoded detect stream, so
+  // there is no transcoding anywhere in the chain. The same path works on
+  // port 8971 (authenticated) and 5000 (not); only the Authorization header
+  // added in run_stream_() differs.
+  std::string url = this->base_url_();
   url += "/api/";
   url += c.camera_name;
   url += "?fps=";
@@ -346,6 +446,20 @@ void HaLiveCamera::run_stream_(size_t index) {
 
   this->last_started_index_ = static_cast<int>(index);
 
+  // A 401 below clears the token, so this re-logs in on the next pass.
+  if (!this->username_.empty() && this->jwt_.empty()) {
+    if (!this->login_()) {
+      this->set_status_(StreamStatus::AUTH_FAILED);
+      vTaskDelay(pdMS_TO_TICKS(5000));
+      return;
+    }
+    if (this->jwt_.empty()) {
+      this->set_status_(StreamStatus::CONNECTING);
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      return;
+    }
+  }
+
   const std::string url = this->build_url_(entry);
 
   esp_http_client_config_t cfg = {};
@@ -363,6 +477,13 @@ void HaLiveCamera::run_stream_(size_t index) {
     return;
   }
 
+  std::string bearer;
+  if (!this->jwt_.empty()) {
+    bearer = "Bearer ";
+    bearer += this->jwt_;
+    esp_http_client_set_header(client, "Authorization", bearer.c_str());
+  }
+
   esp_err_t err = esp_http_client_open(client, 0);
   if (err != ESP_OK) {
     ESP_LOGW(TAG, "connect failed: %s", esp_err_to_name(err));
@@ -374,10 +495,18 @@ void HaLiveCamera::run_stream_(size_t index) {
   esp_http_client_fetch_headers(client);
   const int code = esp_http_client_get_status_code(client);
   if (code == 401 || code == 403) {
-    // Only reachable if pointed at Frigate's authenticated port (8971).
-    ESP_LOGW(TAG, "auth rejected (HTTP %d) -- use Frigate's port 5000", code);
-    this->set_status_(StreamStatus::AUTH_FAILED);
     esp_http_client_cleanup(client);
+    if (this->username_.empty()) {
+      ESP_LOGE(TAG, "auth rejected (HTTP %d) and no username is configured -- "
+                    "port 8971 needs username/password", code);
+      this->set_status_(StreamStatus::AUTH_FAILED);
+      return;
+    }
+    // Sessions expire (auth.session_length, 24h by default). Drop the token
+    // and let the next pass log in again; only a rejected LOGIN is fatal.
+    ESP_LOGI(TAG, "session expired, re-authenticating");
+    this->jwt_.clear();
+    this->set_status_(StreamStatus::RECONNECTING);
     return;
   }
   if (code != 200) {
