@@ -9,6 +9,9 @@
 
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
+#ifdef CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+#include "esp_crt_bundle.h"
+#endif
 #include "freertos/task.h"
 
 #ifdef USE_API
@@ -139,6 +142,10 @@ void HaLiveCamera::dump_config() {
                 (unsigned) this->max_height_, (unsigned) this->fb_size_, (unsigned) NUM_FB);
   ESP_LOGCONFIG(TAG, "  Max JPEG:  %u bytes", (unsigned) this->jpeg_in_size_);
   ESP_LOGCONFIG(TAG, "  RGB order: %s", this->rgb_order_bgr_ ? "BGR (little endian)" : "RGB (big endian)");
+  ESP_LOGCONFIG(TAG, "  Transport: %s", !this->url_is_https_()
+                                            ? "http (no encryption)"
+                                            : (this->verify_ssl_ ? "https (certificate verified)"
+                                                                 : "https (encrypted, certificate not verified)"));
   ESP_LOGCONFIG(TAG, "  Auth:      %s", this->username_.empty()
                                             ? "none (unauthenticated port 5000)"
                                             : this->username_.c_str());
@@ -296,6 +303,29 @@ void HaLiveCamera::blank_display_() {
   this->ready_index_.store(target, std::memory_order_release);
 }
 
+void HaLiveCamera::apply_tls_(esp_http_client_config_t &cfg) const {
+  if (!this->url_is_https_())
+    return;
+
+  if (this->verify_ssl_) {
+#ifdef CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+    // Validate against the bundled public CA roots. Only useful when a reverse
+    // proxy in front of Frigate holds a real certificate.
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+#else
+    ESP_LOGW(TAG, "verify_ssl requested but the certificate bundle is not "
+                  "compiled in; connecting without verification");
+#endif
+    return;
+  }
+
+  // Leaving cert_pem, crt_bundle_attach and use_global_ca_store all unset makes
+  // esp-tls skip peer verification entirely, which is the only way to talk to
+  // Frigate's self-signed certificate. The traffic is still encrypted; what we
+  // give up is any proof of who is on the other end.
+  cfg.skip_cert_common_name_check = true;
+}
+
 std::string HaLiveCamera::base_url_() const {
   std::string url = this->frigate_url_;
   if (!url.empty() && url.back() == '/')
@@ -360,6 +390,7 @@ bool HaLiveCamera::login_() {
   cfg.buffer_size_tx = 1024;
   cfg.event_handler = HaLiveCamera::login_event_;
   cfg.user_data = this;
+  this->apply_tls_(cfg);
 
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
   if (client == nullptr)
@@ -383,8 +414,14 @@ bool HaLiveCamera::login_() {
   }
   if (code == 400) {
     // nginx answers a plain HTTP request on an HTTPS port with exactly this.
-    ESP_LOGE(TAG, "login returned HTTP 400 -- port 8971 is still serving HTTPS. "
-                  "Set \"tls: enabled: False\" in Frigate's config and restart it.");
+    if (!this->url_is_https_()) {
+      ESP_LOGE(TAG, "login returned HTTP 400 -- frigate_url is http:// but the "
+                    "server is speaking HTTPS. Change it to https://%s",
+               this->frigate_url_.c_str() + (this->frigate_url_.rfind("http://", 0) == 0 ? 7 : 0));
+    } else {
+      ESP_LOGE(TAG, "login returned HTTP 400 -- Frigate rejected the request. "
+                    "If you set \"tls: enabled: false\", use http:// instead.");
+    }
     return true;
   }
   if (code != 200) {
@@ -476,6 +513,7 @@ void HaLiveCamera::run_stream_(size_t index) {
   cfg.buffer_size_tx = 1024;
   cfg.disable_auto_redirect = false;
   cfg.keep_alive_enable = true;
+  this->apply_tls_(cfg);
 
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
   if (client == nullptr) {
