@@ -37,6 +37,7 @@ CONF_TASK_PRIORITY = "task_priority"
 CONF_RGB_ORDER = "rgb_order"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
+CONF_VERIFY_SSL = "verify_ssl"
 
 ha_live_camera_ns = cg.esphome_ns.namespace("ha_live_camera")
 HaLiveCamera = ha_live_camera_ns.class_("HaLiveCamera", cg.Component, image.Image_)
@@ -101,6 +102,11 @@ CONFIG_SCHEMA = cv.All(
             # anything that can reach it.
             cv.Optional(CONF_USERNAME): cv.string_strict,
             cv.Optional(CONF_PASSWORD): cv.string_strict,
+            # Only consulted for https:// URLs. Frigate's own certificate is
+            # self-signed and cannot be verified by anything, so the default is
+            # False -- encrypted, but not authenticated. Set True only behind a
+            # reverse proxy with a real certificate.
+            cv.Optional(CONF_VERIFY_SSL, default=False): cv.boolean,
             cv.Optional(CONF_ON_FRAME): automation.validate_automation(
                 {
                     cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
@@ -131,6 +137,7 @@ async def to_code(config):
     cg.add(var.set_max_frame_bytes(config[CONF_MAX_FRAME_BYTES]))
     cg.add(var.set_task_priority(config[CONF_TASK_PRIORITY]))
     cg.add(var.set_rgb_order_bgr(config[CONF_RGB_ORDER] == "bgr"))
+    cg.add(var.set_verify_ssl(config[CONF_VERIFY_SSL]))
     if CONF_USERNAME in config:
         cg.add(var.set_credentials(config[CONF_USERNAME], config.get(CONF_PASSWORD, "")))
 

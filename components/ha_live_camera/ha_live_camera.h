@@ -105,6 +105,13 @@ class HaLiveCamera : public Component, public image::Image {
     this->username_ = user;
     this->password_ = pass;
   }
+  // Only consulted for https:// URLs. Frigate's built-in certificate is
+  // self-signed, so there is nothing a public CA could vouch for -- verifying
+  // it is not possible, and false gives you exactly what Home Assistant's own
+  // Frigate integration does with "Validate SSL" unticked: encrypted, but
+  // taking the server's word for who it is. Set true only when Frigate sits
+  // behind a reverse proxy holding a real certificate.
+  void set_verify_ssl(bool v) { this->verify_ssl_ = v; }
 
   void add_frame_trigger(Trigger<> *t) { this->frame_triggers_.push_back(t); }
   void add_status_trigger(Trigger<std::string> *t) { this->status_triggers_.push_back(t); }
@@ -156,6 +163,9 @@ class HaLiveCamera : public Component, public image::Image {
   // false only when Frigate actively rejected the credentials.
   bool login_();
   static esp_err_t login_event_(esp_http_client_event_t *evt);
+  // Fill in the TLS fields of an esp_http_client config, if the URL is https.
+  void apply_tls_(esp_http_client_config_t &cfg) const;
+  bool url_is_https_() const { return this->frigate_url_.rfind("https://", 0) == 0; }
 
   std::string frigate_url_;
   uint8_t stream_fps_{15};
@@ -170,6 +180,7 @@ class HaLiveCamera : public Component, public image::Image {
 
   std::string username_;
   std::string password_;
+  bool verify_ssl_{false};
   // Session token from /api/login. Default lifetime is 24h (auth.session_length);
   // rather than track expiry we just re-login when a stream comes back 401.
   std::string jwt_;
