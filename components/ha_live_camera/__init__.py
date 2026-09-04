@@ -127,6 +127,33 @@ CONFIG_SCHEMA = cv.All(
 )
 
 
+def _require_tls13():
+    """Make TLS 1.3 actually reachable.
+
+    Frigate's nginx on port 8971 serves TLS 1.3 ONLY -- offering it TLS 1.2 gets
+    a protocol_version alert back, which surfaces as mbedTLS -0x7780.
+
+    Two things stop TLS 1.3 being available by default:
+      * ESP-IDF has CONFIG_MBEDTLS_SSL_PROTO_TLS1_3 off, and
+      * it `depends on MBEDTLS_SSL_KEEP_PEER_CERTIFICATE`, which ESPHome turns
+        OFF by default to save ~4kB of heap per connection.
+    So simply asking for TLS1_3 in sdkconfig_options is silently dropped by
+    Kconfig -- the dependency has to be restored first.
+    """
+    from esphome.components import esp32
+
+    try:
+        esp32.require_mbedtls_peer_cert()
+    except AttributeError:  # ESPHome older than the require_* helpers
+        esp32.add_idf_sdkconfig_option("CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE", True)
+    try:
+        # TLS 1.3 cipher suites include TLS_AES_256_GCM_SHA384.
+        esp32.require_mbedtls_sha512()
+    except AttributeError:
+        pass
+    esp32.add_idf_sdkconfig_option("CONFIG_MBEDTLS_SSL_PROTO_TLS1_3", True)
+
+
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
@@ -137,6 +164,8 @@ async def to_code(config):
     cg.add(var.set_max_frame_bytes(config[CONF_MAX_FRAME_BYTES]))
     cg.add(var.set_task_priority(config[CONF_TASK_PRIORITY]))
     cg.add(var.set_rgb_order_bgr(config[CONF_RGB_ORDER] == "bgr"))
+    if config[CONF_FRIGATE_URL].lower().startswith("https://"):
+        _require_tls13()
     cg.add(var.set_verify_ssl(config[CONF_VERIFY_SSL]))
     if CONF_USERNAME in config:
         cg.add(var.set_credentials(config[CONF_USERNAME], config.get(CONF_PASSWORD, "")))
