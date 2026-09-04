@@ -130,28 +130,29 @@ CONFIG_SCHEMA = cv.All(
 def _require_tls13():
     """Make TLS 1.3 actually reachable.
 
-    Frigate's nginx on port 8971 serves TLS 1.3 ONLY -- offering it TLS 1.2 gets
-    a protocol_version alert back, which surfaces as mbedTLS -0x7780.
+    Frigate's nginx on port 8971 serves TLS 1.3 ONLY -- offer it TLS 1.2 and it
+    replies with a protocol_version alert, which surfaces as mbedTLS -0x7780.
 
-    Two things stop TLS 1.3 being available by default:
-      * ESP-IDF has CONFIG_MBEDTLS_SSL_PROTO_TLS1_3 off, and
-      * it `depends on MBEDTLS_SSL_KEEP_PEER_CERTIFICATE`, which ESPHome turns
-        OFF by default to save ~4kB of heap per connection.
-    So simply asking for TLS1_3 in sdkconfig_options is silently dropped by
-    Kconfig -- the dependency has to be restored first.
+    ESP-IDF has CONFIG_MBEDTLS_SSL_PROTO_TLS1_3 off by default, and it
+    `depends on MBEDTLS_SSL_KEEP_PEER_CERTIFICATE`, which ESPHome explicitly
+    disables to save ~4kB of heap per connection. With the dependency unmet
+    Kconfig silently drops the TLS 1.3 request, so the dependency has to be
+    restored as well.
+
+    These are written with add_idf_sdkconfig_option rather than the
+    require_mbedtls_* helpers: the helpers set a flag that the esp32 component
+    reads inside its OWN to_code, which has already run by the time a component
+    like this one is code-generated. add_idf_sdkconfig_option writes straight
+    into the options dict, and the last write wins.
     """
     from esphome.components import esp32
 
-    try:
-        esp32.require_mbedtls_peer_cert()
-    except AttributeError:  # ESPHome older than the require_* helpers
-        esp32.add_idf_sdkconfig_option("CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE", True)
-    try:
-        # TLS 1.3 cipher suites include TLS_AES_256_GCM_SHA384.
-        esp32.require_mbedtls_sha512()
-    except AttributeError:
-        pass
+    esp32.add_idf_sdkconfig_option("CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE", True)
     esp32.add_idf_sdkconfig_option("CONFIG_MBEDTLS_SSL_PROTO_TLS1_3", True)
+    # TLS 1.3 suites include TLS_AES_256_GCM_SHA384; ESP-IDF 6 builds drop
+    # SHA-384/512 unless something asks for them.
+    esp32.add_idf_sdkconfig_option("CONFIG_MBEDTLS_SHA384_C", True)
+    esp32.add_idf_sdkconfig_option("CONFIG_MBEDTLS_SHA512_C", True)
 
 
 async def to_code(config):
